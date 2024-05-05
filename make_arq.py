@@ -17,30 +17,25 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-from __future__ import print_function, division
-import os, sys
 import argparse
-import tifffile
-import numpy
-import struct
-import time
-import tempfile
 import json
+import os
 import subprocess
-import stat
+import tempfile
+import time
 
-try:
-    import _makearq
-    _has_makearq = True
-except ImportError:
-    _has_makearq = False
+import numpy
+import tifffile
+
+import _makearq
 
 
 def color(row, col):
     return ((row & 1) << 1) + (col & 1)
 
+
 def dngcolor(row, col):
-    return (0x94949494 >> ((((row) << 1 & 14) + ((col) & 1)) << 1) & 3)
+    return 0x94949494 >> (((row << 1 & 14) + (col & 1)) << 1) & 3
 
 
 def get_sony_frame_data(data, frame, idx, factor):
@@ -51,88 +46,17 @@ def get_sony_frame_data(data, frame, idx, factor):
     rowstart = 1 if (idx // 4) >= 2 else 0
     colstart = 1 if (idx // 4) % 2 else 0
     r_off, c_off = {
-        0 : (1, 1),
-        1 : (0, 1),
-        2 : (0, 0),
-        3 : (1, 0)
-        }[idx % 4]
+        0: (1, 1),
+        1: (0, 1),
+        2: (0, 0),
+        3: (1, 0)
+    }[idx % 4]
     is_dng = len(data[0][0]) == 3
 
-    if _has_makearq:
-        _makearq.get_sony_frame_data(data, filename, width, height, offset,
-                                     factor, r_off, c_off, rowstart, colstart,
-                                     is_dng)
-    else:
-        fmt = '=' + ('H' * width)
-        rowbytes = width * 2
+    _makearq.get_sony_frame_data(data, filename, width, height, offset,
+                                 factor, r_off, c_off, rowstart, colstart,
+                                 is_dng)
 
-        rowidx = list(range(height))
-        colidx = list(range(width))
-
-        get_color = dngcolor if is_dng else color
-        fwidth, fheight = width * factor, height * factor
-        with open(filename, 'rb') as f:
-            f.seek(offset)
-            for row in rowidx:
-                d = f.read(rowbytes)
-                v = struct.unpack(fmt, d)
-                rr = (row + r_off) * factor + rowstart
-                if 0 <= rr < fheight:
-                    rowdata = data[rr]
-                    for col in colidx:
-                        cc = (col + c_off) * factor + colstart
-                        if 0 <= cc < fwidth:
-                            c = get_color(row, col)
-                            rowdata[cc][c] = v[col]        
-
-try:
-    import rawpy
-    
-    def get_fuji_frame_data(data, frame, idx, factor):
-        filename = frame[0]
-        is_dng = len(data[0][0]) == 3
-        
-        with rawpy.imread(filename) as raw:
-            im = raw.raw_image
-            r_off, c_off = {
-                0 : (0, 0),
-                1 : (1, 0),
-                2 : (0, 1),
-                3 : (1, 1)
-                }[idx % 4]
-            if factor == 1:
-                rowstart = 0
-                colstart = 0
-            else:
-                rowstart, colstart = {
-                    0 : (4, 2),
-                    1 : (-1, 2),
-                    2 : (4, -3),
-                    3 : (-1, -3)
-                    }[idx // 4]
-
-            if _has_makearq:
-                _makearq.get_fuji_frame_data(
-                    im, len(im), len(im[0]), factor,
-                    data, r_off, c_off, rowstart, colstart, is_dng)
-            else:
-                rmax = len(im) * factor
-                cmax = len(im[0]) * factor
-                get_color = dngcolor if is_dng else color
-                for y, row in enumerate(im):
-                    rr = (y + r_off) * factor + rowstart
-                    if rr >= 0 and rr < rmax:
-                        rowdata = data[rr]
-                        for x, v in enumerate(row):
-                            cc = (x + c_off) * factor + colstart
-                            if cc >= 0 and cc < cmax:
-                                c = get_color(y, x)
-                                rowdata[cc][c] = v
-                            
-except ImportError:
-    def get_fuji_frame_data(*args):
-        raise ValueError("please install rawpy to enable FUJIFILM support")
-    
 
 def getopts():
     p = argparse.ArgumentParser()
@@ -177,7 +101,7 @@ def check_valid_frames(frames):
         'SONY ILCE-7CR',
         'FUJIFILM GFX 100',
         'FUJIFILM GFX100S',
-        }
+    }
     for (name, tags) in frames:
         seq.add(tags['MakerNotes:SequenceNumber'])
         make.add(tags['EXIF:Make'])
@@ -197,13 +121,13 @@ def check_valid_frames(frames):
         height.add(tags['EXIF:ImageHeight'])
     else:
         width.add(tags['RAF:RawImageFullWidth'])
-        height.add(tags['RAF:RawImageFullHeight'])        
+        height.add(tags['RAF:RawImageFullHeight'])
     if len(width) != 1 or len(height) != 1:
         raise ValueError('the frames have different dimensions')
     if len(lens) != 1 or len(aperture) != 1 or len(shutter) != 1:
         raise ValueError('the frames have different lenses and/or exposures')
     off = min(seq)
-    if seq != set(range(off, off+len(frames))):
+    if seq != set(range(off, off + len(frames))):
         raise ValueError('the frames do not form a valid sequence')
     return is_sony
 
@@ -215,28 +139,30 @@ def get_frames(framenames):
         frames.append((name, tags))
     is_sony = check_valid_frames(frames)
     seq2idx = {
-        2 : 0,
-        1 : 1,
-        4 : 2,
-        3 : 3,
-        }
+        2: 0,
+        1: 1,
+        4: 2,
+        3: 3,
+    }
+
     def key(t):
         sn = t[1]['MakerNotes:SequenceNumber'] - 1
-        s = 1 + (sn) % 4
+        s = 1 + sn % 4
         i = seq2idx[s]
         g = seq2idx[1 + sn // 4]
-        return (g, i)
+        return g, i
+
     frames.sort(key=key)
     if is_sony:
         w, h = frames[0][1]['EXIF:ImageWidth'], frames[0][1]['EXIF:ImageHeight']
     else:
         w, h = frames[0][1]['RAF:RawImageFullWidth'], \
-               frames[0][1]['RAF:RawImageFullHeight']
+            frames[0][1]['RAF:RawImageFullHeight']
     if len(frames) == 16:
         w *= 2
         h *= 2
     return frames, w, h, is_sony
-    
+
 
 def get_frame_data(data, frame, idx, is16, is_sony):
     if not is16:
@@ -246,7 +172,7 @@ def get_frame_data(data, frame, idx, is16, is_sony):
     if is_sony:
         get_sony_frame_data(data, frame, idx, factor)
     else:
-        get_fuji_frame_data(data, frame, idx, factor)
+        raise NotImplementedError()
 
 
 def write_raw(filename, data, outtags, is16, is_sony):
@@ -263,17 +189,17 @@ def write_raw(filename, data, outtags, is16, is_sony):
                 print("WARNING: can't determine camera WB (%s)" % str(e))
         if is_dng:
             bkey = "MakerNotes:BlackLevel"
-            if bkey in outtags: 
+            if bkey in outtags:
                 try:
                     black = [int(c) for c in outtags[bkey].split()]
-                except Exception as e:
-                    print("WARNING: can't determine black levels (%s)" % str(e))
+                except Exception as ex:
+                    print("WARNING: can't determine black levels (%s)" % str(ex))
             wkey = "EXIF:WhiteLevel"
             if wkey in outtags:
                 try:
                     white = [int(outtags[wkey])] * 4
-                except Exception as e:
-                    print("WARNING: can't determine white levels (%s)" % str(e))
+                except Exception as ex:
+                    print("WARNING: can't determine white levels (%s)" % str(ex))
     else:
         wbkey = "RAF:WB_GRBLevels"
         if wbkey in outtags:
@@ -281,22 +207,22 @@ def write_raw(filename, data, outtags, is16, is_sony):
                 wb = [int(c) for c in outtags[wbkey].split()]
                 if len(wb) == 3:
                     wb.append(0)
-            except Exception as e:
-                print("WARNING: can't determine camera WB (%s)" % str(e))
+            except Exception as ex:
+                print("WARNING: can't determine camera WB (%s)" % str(ex))
         bkey = "RAF:BlackLevel"
-        if bkey in outtags: 
+        if bkey in outtags:
             try:
                 black = [int(c) for c in outtags[bkey].split()]
-            except Exception as e:
-                print("WARNING: can't determine black levels (%s)" % str(e))
+            except Exception as ex:
+                print("WARNING: can't determine black levels (%s)" % str(ex))
         if is_dng:
             white = [0xffff] * 4
-           
+
     extratags = []
     if is_dng:
-        extratags.append((50706, 'B', 4, [1, 1, 0, 0])) # DNG version 1.1.0.0
-        extratags.append((339, 'H', 1, [1])) # SampleFormat
-        #extratags.append((258, 'H', 1, [16])) # BitsPerSample
+        extratags.append((50706, 'B', 4, [1, 1, 0, 0]))  # DNG version 1.1.0.0
+        extratags.append((339, 'H', 1, [1]))  # SampleFormat
+        # extratags.append((258, 'H', 1, [16])) # BitsPerSample
         bitspersample = "16 16 16"
         # crop
         crop_origin, crop_size = None, None
@@ -319,15 +245,15 @@ def write_raw(filename, data, outtags, is16, is_sony):
                 print("WARNING: can't determine crop (%s)" % str(e))
         if crop_origin and crop_size:
             if is16:
-                crop_origin = [c*2 for c in crop_origin]
-                crop_size = [c*2 for c in crop_size]
+                crop_origin = [c * 2 for c in crop_origin]
+                crop_size = [c * 2 for c in crop_size]
             h, w, _ = data.shape
-            data = data[crop_origin[1]:crop_origin[1]+crop_size[1],
-                        crop_origin[0]:crop_origin[0]+crop_size[0]]
+            data = data[crop_origin[1]:crop_origin[1] + crop_size[1],
+                   crop_origin[0]:crop_origin[0] + crop_size[0]]
     else:
-        #extratags.append((258, 'H', 1, [14 if is_sony else 16])) # BitsPerSample
+        # extratags.append((258, 'H', 1, [14 if is_sony else 16])) # BitsPerSample
         bitspersample = ' '.join(['14' if is_sony else '16'] * 4)
-        
+
     if wb is not None:
         extratags.append((29459, 'H', 4, wb))
     if black is not None:
@@ -341,7 +267,7 @@ def write_raw(filename, data, outtags, is16, is_sony):
 
     # try preserving the tags
     for key in ("SourceFile",
-                "MakerNotes:SequenceNumber", 
+                "MakerNotes:SequenceNumber",
                 "EXIF:SamplesPerPixel",
                 "EXIF:ImageWidth",
                 "EXIF:ImageHeight",
@@ -376,19 +302,19 @@ def write_raw(filename, data, outtags, is16, is_sony):
     os.close(fd)
     with open(jsonname, 'w') as out:
         json.dump([outtags], out)
-    
+
     p = subprocess.Popen(['exiftool', '-overwrite_original',
                           '-G', '-j=' + jsonname, filename],
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     err, _ = p.communicate()
     os.unlink(jsonname)
-    
+
     # make sure the file is writable
     os.chmod(filename, 0o666)
-    
+
     if p.returncode != 0:
         raise IOError(err)
- 
+
 
 def main():
     start = time.time()
@@ -411,11 +337,3 @@ def main():
     write_raw(opts.output, data, frames[0][1], is16, is_sony)
     end = time.time()
     print('Total time: %.3f' % (end - start))
-
-
-if __name__ == '__main__':
-    try:
-        main()
-    except Exception as e:
-        print('ERROR: %s' % str(e))
-        exit(-1)
